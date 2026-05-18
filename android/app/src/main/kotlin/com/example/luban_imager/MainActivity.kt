@@ -25,6 +25,7 @@ import top.zibin.luban.api.OnCompressListener
 class MainActivity : FlutterActivity() {
     private val channelName = "luban_imager/native_images"
     private val pickImagesRequest = 4101
+    private val pickAlbumImageRequest = 4103
 
     private var channel: MethodChannel? = null
     private var pendingPickResult: MethodChannel.Result? = null
@@ -36,6 +37,7 @@ class MainActivity : FlutterActivity() {
         channel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "pickImages" -> pickImages(result)
+                "pickAlbumImage" -> pickAlbumImage(result)
                 "takeSharedImages" -> takeSharedImages(result)
                 "compressImage" -> compressImage(call.arguments, result)
                 "overwriteOriginal" -> overwriteOriginal(call.arguments, result)
@@ -58,6 +60,7 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
             pickImagesRequest -> finishPickImages(resultCode, data)
+            pickAlbumImageRequest -> finishPickAlbumImage(resultCode, data)
         }
     }
 
@@ -81,6 +84,33 @@ class MainActivity : FlutterActivity() {
         } catch (error: Exception) {
             pendingPickResult = null
             result.error("picker_unavailable", error.message, null)
+        }
+    }
+
+    private fun pickAlbumImage(result: MethodChannel.Result) {
+        if (pendingPickResult != null) {
+            result.error("busy", "正在选择图片", null)
+            return
+        }
+
+        pendingPickResult = result
+        val intent = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Intent(MediaStore.ACTION_PICK_IMAGES).apply {
+                type = "image/*"
+            }
+        } else {
+            Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
+                type = "image/*"
+            }
+        }).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        try {
+            startActivityForResult(intent, pickAlbumImageRequest)
+        } catch (error: Exception) {
+            pendingPickResult = null
+            result.error("gallery_unavailable", error.message, null)
         }
     }
 
@@ -117,6 +147,28 @@ class MainActivity : FlutterActivity() {
 
     private fun extractUri(data: Intent): Uri? {
         return data.data ?: data.clipData?.getItemAt(0)?.uri
+    }
+
+    private fun finishPickAlbumImage(resultCode: Int, data: Intent?) {
+        val result = pendingPickResult ?: return
+        pendingPickResult = null
+
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            result.success(emptyList<Map<String, Any>>())
+            return
+        }
+
+        try {
+            val uri = extractUri(data)
+            val payload = if (uri == null) {
+                emptyList()
+            } else {
+                listOf(buildGalleryImage(uri))
+            }
+            result.success(payload)
+        } catch (error: Exception) {
+            result.error("gallery_pick_failed", error.message, null)
+        }
     }
 
     private fun takeSharedImages(result: MethodChannel.Result) {
@@ -169,8 +221,16 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun buildSharedImage(uri: Uri): Map<String, Any> {
+        return buildCachedReadOnlyImage(uri, "shared-originals")
+    }
+
+    private fun buildGalleryImage(uri: Uri): Map<String, Any> {
+        return buildCachedReadOnlyImage(uri, "gallery-originals")
+    }
+
+    private fun buildCachedReadOnlyImage(uri: Uri, child: String): Map<String, Any> {
         val displayName = queryDisplayName(uri) ?: "image"
-        val previewFile = copyUriToCache(uri, displayName, "shared-originals")
+        val previewFile = copyUriToCache(uri, displayName, child)
         val dimensions = readDimensionsFromFile(previewFile)
         val originalSize = previewFile.length()
 

@@ -101,6 +101,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
   ImageJob? _job;
   var _previewMode = PreviewMode.original;
   var _compareFraction = 0.5;
+  var _comparePreviewScale = 1.0;
   var _isPicking = false;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
@@ -170,6 +171,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
       _job = ImageJob(image);
       _previewMode = PreviewMode.original;
       _compareFraction = 0.5;
+      _comparePreviewScale = 1.0;
     });
     if (message != null) {
       _showMessage(message);
@@ -177,7 +179,18 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
     await _compressSelected();
   }
 
-  Future<void> _pickImages() async {
+  Future<void> _pickFiles() async {
+    await _pickNativeImage(method: 'pickImages', errorMessage: '选择文件失败');
+  }
+
+  Future<void> _pickAlbumImage() async {
+    await _pickNativeImage(method: 'pickAlbumImage', errorMessage: '选择相册图片失败');
+  }
+
+  Future<void> _pickNativeImage({
+    required String method,
+    required String errorMessage,
+  }) async {
     if (_isPicking) {
       return;
     }
@@ -188,7 +201,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
     });
 
     try {
-      final response = await _channel.invokeMethod<List<dynamic>>('pickImages');
+      final response = await _channel.invokeMethod<List<dynamic>>(method);
       final images = response ?? [];
 
       if (!mounted || images.isEmpty) {
@@ -199,7 +212,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
         Map<dynamic, dynamic>.from(images.first as Map),
       );
     } on PlatformException catch (error) {
-      _showMessage(error.message ?? '选择图片失败');
+      _showMessage(error.message ?? errorMessage);
     } finally {
       if (mounted) {
         setState(() {
@@ -252,6 +265,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
           ..isCompressing = false
           ..overwritten = false;
         _previewMode = PreviewMode.compare;
+        _comparePreviewScale = 1.0;
       });
       _showMessage(
         compressed.passthrough
@@ -394,6 +408,16 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
       _job = null;
       _previewMode = PreviewMode.original;
       _compareFraction = 0.5;
+      _comparePreviewScale = 1.0;
+    });
+  }
+
+  void _handleCompareScaleChanged(double scale) {
+    if (!mounted || (_comparePreviewScale - scale).abs() < 0.01) {
+      return;
+    }
+    setState(() {
+      _comparePreviewScale = scale;
     });
   }
 
@@ -478,9 +502,17 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: TextButton.icon(
-                    onPressed: _isPicking ? null : _pickImages,
-                    icon: const Icon(Icons.add_photo_alternate_outlined),
-                    label: const Text('重新选择'),
+                    onPressed: _isPicking ? null : _pickFiles,
+                    icon: const Icon(Icons.insert_drive_file_outlined),
+                    label: const Text('选择文件'),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: TextButton.icon(
+                    onPressed: _isPicking ? null : _pickAlbumImage,
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: const Text('相册'),
                   ),
                 ),
               ],
@@ -505,16 +537,28 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
             ),
             const SizedBox(height: 20),
             Text(
-              '选择图片开始压缩',
+              '选择文件或相册图片开始压缩',
               style: Theme.of(
                 context,
               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _isPicking ? null : _pickImages,
-              icon: const Icon(Icons.add_photo_alternate_outlined),
-              label: const Text('选择图片'),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              alignment: WrapAlignment.center,
+              children: [
+                FilledButton.icon(
+                  onPressed: _isPicking ? null : _pickFiles,
+                  icon: const Icon(Icons.insert_drive_file_outlined),
+                  label: const Text('选择文件'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _isPicking ? null : _pickAlbumImage,
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('从相册选择'),
+                ),
+              ],
             ),
           ],
         ),
@@ -653,10 +697,11 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
             ),
             if (showCompareSlider) ...[
               const SizedBox(height: 4),
-              Slider(
+              _CompareSlider(
                 value: _compareFraction,
                 min: 0.05,
                 max: 0.95,
+                dragScale: _comparePreviewScale,
                 onChanged: (value) {
                   setState(() {
                     _compareFraction = value;
@@ -735,6 +780,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
             Positioned(right: 12, top: 12, child: _PreviewBadge(label: '压缩')),
           ],
         ),
+        onScaleChanged: _handleCompareScaleChanged,
         child: LayoutBuilder(
           builder: (context, constraints) {
             return Stack(
@@ -964,18 +1010,186 @@ class _MetricBlock extends StatelessWidget {
   }
 }
 
+class _CompareSlider extends StatefulWidget {
+  const _CompareSlider({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.dragScale,
+    required this.onChanged,
+  });
+
+  final double value;
+  final double min;
+  final double max;
+  final double dragScale;
+  final ValueChanged<double> onChanged;
+
+  @override
+  State<_CompareSlider> createState() => _CompareSliderState();
+}
+
+class _CompareSliderState extends State<_CompareSlider> {
+  static const _height = 48.0;
+  static const _horizontalPadding = 16.0;
+  static const _trackHeight = 4.0;
+  static const _thumbSize = 22.0;
+
+  double? _dragValue;
+
+  double _clampValue(double value) {
+    return value.clamp(widget.min, widget.max).toDouble();
+  }
+
+  double _valueFromLocalX(double localX, double trackWidth) {
+    final normal = (localX / trackWidth).clamp(0.0, 1.0).toDouble();
+    return widget.min + normal * (widget.max - widget.min);
+  }
+
+  void _jumpTo(double localX, double trackWidth) {
+    final value = _clampValue(_valueFromLocalX(localX, trackWidth));
+    _dragValue = value;
+    widget.onChanged(value);
+  }
+
+  void _handleDragStart(DragStartDetails details) {
+    _dragValue ??= widget.value;
+  }
+
+  void _handleDragUpdate(DragUpdateDetails details, double trackWidth) {
+    if (trackWidth <= 0) {
+      return;
+    }
+
+    final scale = math.max(1.0, widget.dragScale);
+    final range = widget.max - widget.min;
+    final delta = (details.primaryDelta ?? details.delta.dx) / trackWidth;
+    final nextValue = _clampValue(
+      (_dragValue ?? widget.value) + delta * range / scale,
+    );
+    _dragValue = nextValue;
+    widget.onChanged(nextValue);
+  }
+
+  void _handleDragEnd(DragEndDetails details) {
+    _dragValue = null;
+  }
+
+  void _handleDragCancel() {
+    _dragValue = null;
+  }
+
+  void _step(double delta) {
+    widget.onChanged(_clampValue(widget.value + delta));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Semantics(
+      label: '对比位置',
+      value: '${(widget.value * 100).round()}%',
+      onIncrease: () => _step(0.02),
+      onDecrease: () => _step(-0.02),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final trackWidth = math.max(1.0, width - _horizontalPadding * 2);
+          final normal =
+              ((widget.value - widget.min) / (widget.max - widget.min))
+                  .clamp(0.0, 1.0)
+                  .toDouble();
+          final thumbCenter = _horizontalPadding + trackWidth * normal;
+
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (details) {
+              _jumpTo(
+                details.localPosition.dx - _horizontalPadding,
+                trackWidth,
+              );
+            },
+            onTapUp: (details) {
+              _dragValue = null;
+            },
+            onHorizontalDragStart: _handleDragStart,
+            onHorizontalDragUpdate: (details) {
+              _handleDragUpdate(details, trackWidth);
+            },
+            onHorizontalDragEnd: _handleDragEnd,
+            onHorizontalDragCancel: _handleDragCancel,
+            child: SizedBox(
+              height: _height,
+              child: Stack(
+                alignment: Alignment.centerLeft,
+                children: [
+                  Positioned(
+                    left: _horizontalPadding,
+                    right: _horizontalPadding,
+                    top: (_height - _trackHeight) / 2,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: colorScheme.outlineVariant,
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: const SizedBox(height: _trackHeight),
+                    ),
+                  ),
+                  Positioned(
+                    left: _horizontalPadding,
+                    width: trackWidth * normal,
+                    top: (_height - _trackHeight) / 2,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary,
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: const SizedBox(height: _trackHeight),
+                    ),
+                  ),
+                  Positioned(
+                    left: thumbCenter - _thumbSize / 2,
+                    top: (_height - _thumbSize) / 2,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.18),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: const SizedBox.square(dimension: _thumbSize),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _ZoomablePreview extends StatefulWidget {
   const _ZoomablePreview({
     required this.width,
     required this.height,
     required this.child,
     this.overlay,
+    this.onScaleChanged,
   });
 
   final int width;
   final int height;
   final Widget child;
   final Widget? overlay;
+  final ValueChanged<double>? onScaleChanged;
 
   @override
   State<_ZoomablePreview> createState() => _ZoomablePreviewState();
@@ -999,11 +1213,26 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
     if (oldWidget.width != widget.width || oldWidget.height != widget.height) {
       _resetTransform();
     }
+    if (oldWidget.onScaleChanged != widget.onScaleChanged) {
+      _scheduleScaleChanged();
+    }
   }
 
   void _resetTransform() {
     _scale = _minScale;
     _offset = Offset.zero;
+    _scheduleScaleChanged();
+  }
+
+  void _scheduleScaleChanged() {
+    if (widget.onScaleChanged == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        widget.onScaleChanged?.call(_scale);
+      }
+    });
   }
 
   double _clampScale(double scale) {
@@ -1044,6 +1273,7 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
       _scale = nextScale;
       _offset = _clampOffset(nextOffset, nextScale);
     });
+    widget.onScaleChanged?.call(nextScale);
   }
 
   void _endGesture(ScaleEndDetails details) {
@@ -1051,6 +1281,7 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
       _scale = _clampScale(_scale);
       _offset = _clampOffset(_offset, _scale);
     });
+    widget.onScaleChanged?.call(_scale);
   }
 
   @override
