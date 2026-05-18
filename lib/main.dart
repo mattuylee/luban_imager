@@ -99,9 +99,9 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
   );
 
   ImageJob? _job;
+  ImagePickSource? _currentPickSource;
   var _previewMode = PreviewMode.original;
   var _compareFraction = 0.5;
-  var _comparePreviewScale = 1.0;
   var _isPicking = false;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
@@ -162,16 +162,20 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
     );
   }
 
-  Future<void> _startImageJob(NativeImage image, {String? message}) async {
+  Future<void> _startImageJob(
+    NativeImage image, {
+    String? message,
+    ImagePickSource? source,
+  }) async {
     if (!mounted) {
       return;
     }
 
     setState(() {
       _job = ImageJob(image);
+      _currentPickSource = source;
       _previewMode = PreviewMode.original;
       _compareFraction = 0.5;
-      _comparePreviewScale = 1.0;
     });
     if (message != null) {
       _showMessage(message);
@@ -180,16 +184,35 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
   }
 
   Future<void> _pickFiles() async {
-    await _pickNativeImage(method: 'pickImages', errorMessage: '选择文件失败');
+    await _pickNativeImage(
+      method: 'pickImages',
+      errorMessage: '选择文件失败',
+      source: ImagePickSource.file,
+    );
   }
 
   Future<void> _pickAlbumImage() async {
-    await _pickNativeImage(method: 'pickAlbumImage', errorMessage: '选择相册图片失败');
+    await _pickNativeImage(
+      method: 'pickAlbumImage',
+      errorMessage: '选择相册图片失败',
+      source: ImagePickSource.album,
+    );
+  }
+
+  Future<void> _repickCurrentSource() async {
+    switch (_currentPickSource) {
+      case ImagePickSource.album:
+        await _pickAlbumImage();
+      case ImagePickSource.file:
+      case null:
+        await _pickFiles();
+    }
   }
 
   Future<void> _pickNativeImage({
     required String method,
     required String errorMessage,
+    required ImagePickSource source,
   }) async {
     if (_isPicking) {
       return;
@@ -222,7 +245,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
     }
 
     if (picked != null && mounted) {
-      await _startImageJob(picked);
+      await _startImageJob(picked, source: source);
     }
   }
 
@@ -265,7 +288,6 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
           ..isCompressing = false
           ..overwritten = false;
         _previewMode = PreviewMode.compare;
-        _comparePreviewScale = 1.0;
       });
       _showMessage(
         compressed.passthrough
@@ -297,7 +319,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
         'compressedPath': compressed.path,
         'suggestedName': _suggestedName(job.original.displayName),
       });
-      _showMessage('已保存到相册');
+      _showMessage('已保存到系统相册');
     } on PlatformException catch (error) {
       _showMessage(error.message ?? '保存失败');
     }
@@ -406,18 +428,9 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
   void _clearImage() {
     setState(() {
       _job = null;
+      _currentPickSource = null;
       _previewMode = PreviewMode.original;
       _compareFraction = 0.5;
-      _comparePreviewScale = 1.0;
-    });
-  }
-
-  void _handleCompareScaleChanged(double scale) {
-    if (!mounted || (_comparePreviewScale - scale).abs() < 0.01) {
-      return;
-    }
-    setState(() {
-      _comparePreviewScale = scale;
     });
   }
 
@@ -475,7 +488,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
       },
     );
     overlay.insert(_toastEntry!);
-    _toastTimer = Timer(const Duration(seconds: 1), () {
+    _toastTimer = Timer(const Duration(milliseconds: 1500), () {
       _toastEntry?.remove();
       _toastEntry = null;
       _toastTimer = null;
@@ -502,17 +515,9 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: TextButton.icon(
-                    onPressed: _isPicking ? null : _pickFiles,
-                    icon: const Icon(Icons.insert_drive_file_outlined),
-                    label: const Text('选择文件'),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: TextButton.icon(
-                    onPressed: _isPicking ? null : _pickAlbumImage,
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const Text('相册'),
+                    onPressed: _isPicking ? null : _repickCurrentSource,
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    label: const Text('重新选择'),
                   ),
                 ),
               ],
@@ -537,7 +542,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
             ),
             const SizedBox(height: 20),
             Text(
-              '选择文件或相册图片开始压缩',
+              '选择图片开始压缩',
               style: Theme.of(
                 context,
               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
@@ -556,7 +561,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
                 FilledButton.tonalIcon(
                   onPressed: _isPicking ? null : _pickAlbumImage,
                   icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('从相册选择'),
+                  label: const Text('相册选择'),
                 ),
               ],
             ),
@@ -683,25 +688,25 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
             const SizedBox(height: 14),
             SizedBox(
               height: previewHeight,
-              child: DecoratedBox(
+              child: Container(
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: const Color(0xFFEDEFEA),
                   borderRadius: BorderRadius.circular(8),
+                ),
+                foregroundDecoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: const Color(0xFFDADFD8)),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: _buildImagePreview(job, mode),
-                ),
+                child: _buildImagePreview(job, mode),
               ),
             ),
             if (showCompareSlider) ...[
               const SizedBox(height: 4),
               _CompareSlider(
                 value: _compareFraction,
-                min: 0.05,
-                max: 0.95,
-                dragScale: _comparePreviewScale,
+                min: 0.0,
+                max: 1.0,
                 onChanged: (value) {
                   setState(() {
                     _compareFraction = value;
@@ -774,33 +779,20 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
       return _ZoomablePreview(
         width: job.original.width,
         height: job.original.height,
-        overlay: const Stack(
-          children: [
-            Positioned(left: 12, top: 12, child: _PreviewBadge(label: '原图')),
-            Positioned(right: 12, top: 12, child: _PreviewBadge(label: '压缩')),
-          ],
-        ),
-        onScaleChanged: _handleCompareScaleChanged,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                _PreviewImage(path: compressedPath),
-                ClipRect(
-                  clipper: _CompareClipper(_compareFraction),
-                  child: _PreviewImage(path: job.original.previewPath),
-                ),
-                Positioned(
-                  left: constraints.maxWidth * _compareFraction - 1,
-                  top: 0,
-                  bottom: 0,
-                  child: Container(width: 2, color: Colors.white),
-                ),
-              ],
-            );
-          },
-        ),
+        overlay: _CompareOverlay(fraction: _compareFraction),
+        childBuilder: (context, metrics) {
+          final clipX = metrics.canvasXForViewportFraction(_compareFraction);
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              _PreviewImage(path: compressedPath),
+              ClipRect(
+                clipper: _CompareClipper(clipX),
+                child: _PreviewImage(path: job.original.previewPath),
+              ),
+            ],
+          );
+        },
       );
     }
     return _ZoomablePreview(
@@ -857,6 +849,8 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
 }
 
 enum PreviewMode { original, compressed, compare }
+
+enum ImagePickSource { file, album }
 
 class NativeImage {
   NativeImage({
@@ -1015,14 +1009,12 @@ class _CompareSlider extends StatefulWidget {
     required this.value,
     required this.min,
     required this.max,
-    required this.dragScale,
     required this.onChanged,
   });
 
   final double value;
   final double min;
   final double max;
-  final double dragScale;
   final ValueChanged<double> onChanged;
 
   @override
@@ -1031,7 +1023,6 @@ class _CompareSlider extends StatefulWidget {
 
 class _CompareSliderState extends State<_CompareSlider> {
   static const _height = 48.0;
-  static const _horizontalPadding = 16.0;
   static const _trackHeight = 4.0;
   static const _thumbSize = 22.0;
 
@@ -1061,12 +1052,9 @@ class _CompareSliderState extends State<_CompareSlider> {
       return;
     }
 
-    final scale = math.max(1.0, widget.dragScale);
     final range = widget.max - widget.min;
     final delta = (details.primaryDelta ?? details.delta.dx) / trackWidth;
-    final nextValue = _clampValue(
-      (_dragValue ?? widget.value) + delta * range / scale,
-    );
+    final nextValue = _clampValue((_dragValue ?? widget.value) + delta * range);
     _dragValue = nextValue;
     widget.onChanged(nextValue);
   }
@@ -1095,20 +1083,17 @@ class _CompareSliderState extends State<_CompareSlider> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
-          final trackWidth = math.max(1.0, width - _horizontalPadding * 2);
+          final trackWidth = math.max(1.0, width);
           final normal =
               ((widget.value - widget.min) / (widget.max - widget.min))
                   .clamp(0.0, 1.0)
                   .toDouble();
-          final thumbCenter = _horizontalPadding + trackWidth * normal;
+          final thumbCenter = trackWidth * normal;
 
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTapDown: (details) {
-              _jumpTo(
-                details.localPosition.dx - _horizontalPadding,
-                trackWidth,
-              );
+              _jumpTo(details.localPosition.dx, trackWidth);
             },
             onTapUp: (details) {
               _dragValue = null;
@@ -1125,8 +1110,8 @@ class _CompareSliderState extends State<_CompareSlider> {
                 alignment: Alignment.centerLeft,
                 children: [
                   Positioned(
-                    left: _horizontalPadding,
-                    right: _horizontalPadding,
+                    left: 0,
+                    right: 0,
                     top: (_height - _trackHeight) / 2,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
@@ -1137,7 +1122,7 @@ class _CompareSliderState extends State<_CompareSlider> {
                     ),
                   ),
                   Positioned(
-                    left: _horizontalPadding,
+                    left: 0,
                     width: trackWidth * normal,
                     top: (_height - _trackHeight) / 2,
                     child: DecoratedBox(
@@ -1176,20 +1161,80 @@ class _CompareSliderState extends State<_CompareSlider> {
   }
 }
 
+typedef _ZoomablePreviewChildBuilder =
+    Widget Function(BuildContext context, _ZoomablePreviewMetrics metrics);
+
+class _ZoomablePreviewMetrics {
+  const _ZoomablePreviewMetrics({
+    required this.viewportSize,
+    required this.canvasSize,
+    required this.scale,
+    required this.offset,
+  });
+
+  final Size viewportSize;
+  final Size canvasSize;
+  final double scale;
+  final Offset offset;
+
+  double canvasXForViewportFraction(double fraction) {
+    final viewportX = viewportSize.width * fraction.clamp(0.0, 1.0).toDouble();
+    return canvasSize.width / 2 +
+        (viewportX - viewportSize.width / 2 - offset.dx) / scale;
+  }
+}
+
+class _CompareOverlay extends StatelessWidget {
+  const _CompareOverlay({required this.fraction});
+
+  final double fraction;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final dividerX =
+            constraints.maxWidth * fraction.clamp(0.0, 1.0).toDouble();
+
+        return Stack(
+          children: [
+            Positioned(
+              left: dividerX - 1,
+              top: 0,
+              bottom: 0,
+              child: Container(width: 2, color: Colors.white),
+            ),
+            const Positioned(
+              left: 12,
+              top: 12,
+              child: _PreviewBadge(label: '原图'),
+            ),
+            const Positioned(
+              right: 12,
+              top: 12,
+              child: _PreviewBadge(label: '压缩'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _ZoomablePreview extends StatefulWidget {
   const _ZoomablePreview({
     required this.width,
     required this.height,
-    required this.child,
+    this.child,
+    this.childBuilder,
     this.overlay,
-    this.onScaleChanged,
-  });
+  }) : assert(child != null || childBuilder != null);
 
   final int width;
   final int height;
-  final Widget child;
+  final Widget? child;
+  final _ZoomablePreviewChildBuilder? childBuilder;
   final Widget? overlay;
-  final ValueChanged<double>? onScaleChanged;
 
   @override
   State<_ZoomablePreview> createState() => _ZoomablePreviewState();
@@ -1213,26 +1258,11 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
     if (oldWidget.width != widget.width || oldWidget.height != widget.height) {
       _resetTransform();
     }
-    if (oldWidget.onScaleChanged != widget.onScaleChanged) {
-      _scheduleScaleChanged();
-    }
   }
 
   void _resetTransform() {
     _scale = _minScale;
     _offset = Offset.zero;
-    _scheduleScaleChanged();
-  }
-
-  void _scheduleScaleChanged() {
-    if (widget.onScaleChanged == null) {
-      return;
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        widget.onScaleChanged?.call(_scale);
-      }
-    });
   }
 
   double _clampScale(double scale) {
@@ -1273,7 +1303,6 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
       _scale = nextScale;
       _offset = _clampOffset(nextOffset, nextScale);
     });
-    widget.onScaleChanged?.call(nextScale);
   }
 
   void _endGesture(ScaleEndDetails details) {
@@ -1281,7 +1310,6 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
       _scale = _clampScale(_scale);
       _offset = _clampOffset(_offset, _scale);
     });
-    widget.onScaleChanged?.call(_scale);
   }
 
   @override
@@ -1303,6 +1331,14 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
         _canvasSize = Size(canvasWidth, canvasHeight);
         _scale = _clampScale(_scale);
         _offset = _clampOffset(_offset, _scale);
+        final metrics = _ZoomablePreviewMetrics(
+          viewportSize: _viewportSize,
+          canvasSize: _canvasSize,
+          scale: _scale,
+          offset: _offset,
+        );
+        final previewChild =
+            widget.childBuilder?.call(context, metrics) ?? widget.child!;
 
         return ClipRect(
           child: Stack(
@@ -1322,7 +1358,7 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
                         child: SizedBox(
                           width: canvasWidth,
                           height: canvasHeight,
-                          child: widget.child,
+                          child: previewChild,
                         ),
                       ),
                     ),
@@ -1385,17 +1421,18 @@ class _PreviewBadge extends StatelessWidget {
 }
 
 class _CompareClipper extends CustomClipper<Rect> {
-  const _CompareClipper(this.fraction);
+  const _CompareClipper(this.clipX);
 
-  final double fraction;
+  final double clipX;
 
   @override
   Rect getClip(Size size) {
-    return Rect.fromLTWH(0, 0, size.width * fraction, size.height);
+    final width = clipX.clamp(0.0, size.width).toDouble();
+    return Rect.fromLTWH(0, 0, width, size.height);
   }
 
   @override
   bool shouldReclip(_CompareClipper oldClipper) {
-    return oldClipper.fraction != fraction;
+    return oldClipper.clipX != clipX;
   }
 }

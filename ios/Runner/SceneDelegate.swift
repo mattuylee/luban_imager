@@ -1,7 +1,6 @@
 import Flutter
 import ImageIO
 import Photos
-import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
 
@@ -28,7 +27,7 @@ class SceneDelegate: FlutterSceneDelegate {
   }
 }
 
-private final class NativeImageBridge: NSObject, UIDocumentPickerDelegate {
+private final class NativeImageBridge: NSObject, UIDocumentPickerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
   private enum PendingOperation {
     case pickFile(FlutterResult)
     case pickAlbum(FlutterResult)
@@ -130,19 +129,22 @@ private final class NativeImageBridge: NSObject, UIDocumentPickerDelegate {
       result(FlutterError(code: "busy", message: "正在选择图片", details: nil))
       return
     }
-
-    guard #available(iOS 14.0, *) else {
-      pickImages(result: result)
+    guard let controller = controller else {
+      result(FlutterError(code: "picker_unavailable", message: "无法打开相册", details: nil))
+      return
+    }
+    guard UIImagePickerController.isSourceTypeAvailable(.photoLibrary) else {
+      result(FlutterError(code: "picker_unavailable", message: "相册不可用", details: nil))
       return
     }
 
-    var configuration = PHPickerConfiguration(photoLibrary: .shared())
-    configuration.filter = .images
-    configuration.selectionLimit = 1
-    let picker = PHPickerViewController(configuration: configuration)
+    let picker = UIImagePickerController()
+    picker.sourceType = .photoLibrary
+    picker.mediaTypes = ["public.image"]
+    picker.allowsEditing = false
     picker.delegate = self
     pendingOperation = .pickAlbum(result)
-    controller?.present(picker, animated: true)
+    controller.present(picker, animated: true)
   }
 
   private func compressImage(arguments: Any?, result: @escaping FlutterResult) {
@@ -372,8 +374,10 @@ private final class NativeImageBridge: NSObject, UIDocumentPickerDelegate {
     }
   }
 
-  @available(iOS 14.0, *)
-  func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+  func imagePickerController(
+    _ picker: UIImagePickerController,
+    didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+  ) {
     picker.dismiss(animated: true)
 
     guard let operation = pendingOperation else {
@@ -384,40 +388,33 @@ private final class NativeImageBridge: NSObject, UIDocumentPickerDelegate {
     guard case .pickAlbum(let result) = operation else {
       return
     }
-    guard let provider = results.first?.itemProvider else {
+
+    do {
+      if let url = info[.imageURL] as? URL {
+        result([try buildGalleryImage(sourceURL: url)])
+        return
+      }
+      if let image = info[.originalImage] as? UIImage {
+        result([try buildGalleryImage(image: image)])
+        return
+      }
       result([])
+    } catch {
+      result(FlutterError(code: "gallery_pick_failed", message: error.localizedDescription, details: nil))
+    }
+  }
+
+  func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+    picker.dismiss(animated: true)
+
+    guard let operation = pendingOperation else {
       return
     }
+    pendingOperation = nil
 
-    provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { [weak self] url, error in
-      guard let self = self else {
-        return
-      }
-
-      if let error = error {
-        DispatchQueue.main.async {
-          result(FlutterError(code: "gallery_pick_failed", message: error.localizedDescription, details: nil))
-        }
-        return
-      }
-
-      guard let url = url else {
-        DispatchQueue.main.async {
-          result([])
-        }
-        return
-      }
-
-      do {
-        let payload = try self.buildGalleryImage(sourceURL: url)
-        DispatchQueue.main.async {
-          result([payload])
-        }
-      } catch {
-        DispatchQueue.main.async {
-          result(FlutterError(code: "gallery_pick_failed", message: error.localizedDescription, details: nil))
-        }
-      }
+    switch operation {
+    case .pickFile(let result), .pickAlbum(let result):
+      result([])
     }
   }
 
@@ -459,6 +456,26 @@ private final class NativeImageBridge: NSObject, UIDocumentPickerDelegate {
 
   private func buildGalleryImage(sourceURL: URL) throws -> [String: Any] {
     return try buildCachedReadOnlyImage(sourceURL: sourceURL, child: "gallery-originals")
+  }
+
+  private func buildGalleryImage(image: UIImage) throws -> [String: Any] {
+    let hasAlpha = Self.hasAlpha(image)
+    let displayName = hasAlpha ? "album-image.png" : "album-image.jpg"
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "gallery-picker",
+      isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+      at: directory,
+      withIntermediateDirectories: true
+    )
+    let targetURL = directory.appendingPathComponent("\(UUID().uuidString)-\(displayName)")
+    let data = hasAlpha ? image.pngData() : image.jpegData(compressionQuality: 1)
+    guard let data else {
+      throw NativeImageError.message("无法读取相册图片")
+    }
+    try data.write(to: targetURL, options: .atomic)
+    return try buildGalleryImage(sourceURL: targetURL)
   }
 
   private func buildCachedReadOnlyImage(sourceURL: URL, child: String) throws -> [String: Any] {
@@ -709,9 +726,6 @@ private final class NativeImageBridge: NSObject, UIDocumentPickerDelegate {
     return sanitized.isEmpty ? "image.jpg" : sanitized
   }
 }
-
-@available(iOS 14.0, *)
-extension NativeImageBridge: PHPickerViewControllerDelegate {}
 
 private struct PixelSize {
   let width: Int
