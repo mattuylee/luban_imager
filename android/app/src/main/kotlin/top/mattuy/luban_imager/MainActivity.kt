@@ -1,4 +1,4 @@
-package com.example.luban_imager
+package top.mattuy.luban_imager
 
 import android.app.Activity
 import android.content.ClipData
