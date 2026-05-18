@@ -49,21 +49,61 @@ class _LubanImagerAppState extends State<LubanImagerApp>
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: _appName,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2F6F73),
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF7F8F6),
-        appBarTheme: const AppBarTheme(
-          centerTitle: false,
-          backgroundColor: Color(0xFFF7F8F6),
-          foregroundColor: Color(0xFF172122),
-          elevation: 0,
-        ),
-      ),
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      themeMode: ThemeMode.system,
       home: ImagerHomePage(appName: _appName),
+    );
+  }
+}
+
+class AppTheme {
+  static const _seedColor = Color(0xFF2F6F73);
+  static const _lightBackground = Color(0xFFF7F8F6);
+  static const _darkBackground = Color(0xFF101817);
+
+  static ThemeData light() {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: _seedColor,
+      brightness: Brightness.light,
+    );
+    return _build(
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor: _lightBackground,
+      systemOverlayStyle: SystemUiOverlayStyle.dark,
+    );
+  }
+
+  static ThemeData dark() {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: _seedColor,
+      brightness: Brightness.dark,
+    );
+    return _build(
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor: _darkBackground,
+      systemOverlayStyle: SystemUiOverlayStyle.light,
+    );
+  }
+
+  static ThemeData _build({
+    required ColorScheme colorScheme,
+    required Color scaffoldBackgroundColor,
+    required SystemUiOverlayStyle systemOverlayStyle,
+  }) {
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor: scaffoldBackgroundColor,
+      canvasColor: scaffoldBackgroundColor,
+      appBarTheme: AppBarTheme(
+        centerTitle: false,
+        backgroundColor: scaffoldBackgroundColor,
+        foregroundColor: colorScheme.onSurface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        systemOverlayStyle: systemOverlayStyle,
+      ),
     );
   }
 }
@@ -529,16 +569,18 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
   }
 
   Widget _buildEmptyState() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.image_search_outlined,
               size: 72,
-              color: Color(0xFF5D6F70),
+              color: colorScheme.outline,
             ),
             const SizedBox(height: 20),
             Text(
@@ -575,6 +617,7 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
     final compressed = job.compressed;
     final canCompare = compressed != null;
     final mode = canCompare ? _previewMode : PreviewMode.original;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -691,12 +734,12 @@ class _ImagerHomePageState extends State<ImagerHomePage> {
               child: Container(
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEDEFEA),
+                  color: colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 foregroundDecoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFDADFD8)),
+                  border: Border.all(color: colorScheme.outlineVariant),
                 ),
                 child: _buildImagePreview(job, mode),
               ),
@@ -964,12 +1007,14 @@ class _MetricBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFDADFD8)),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -978,9 +1023,9 @@ class _MetricBlock extends StatelessWidget {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(
-              context,
-            ).textTheme.labelMedium?.copyWith(color: const Color(0xFF5D6F70)),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 7),
           Text(
